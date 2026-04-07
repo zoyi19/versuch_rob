@@ -1,0 +1,316 @@
+================================================================================
+                        IK库代码快速参考卡片
+================================================================================
+
+【核心文件地图】
+================================================================================
+
+📁 kuavo_ik/
+│
+├─ 📄 MY_TEST.py                    ⭐ 最简单的使用示例
+├─ 📄 quick_test.py                 快速测试工具
+├─ 📄 check_reachability.py         专业检查工具
+├─ 📄 test_ik_basic.py              学习示例
+│
+├─ 📁 kuavo_ik/
+│  ├─ 📄 ik_library.py              ⭐⭐⭐ 核心IK算法（最重要）
+│  ├─ 📄 fk_tool.py                 ⭐⭐ FK正运动学工具
+│  ├─ 📄 utils.py                   辅助函数
+│  │
+│  ├─ 📁 example/
+│  │  └─ 📄 read_datasets_and_save_traj.py  实际应用示例
+│  │
+│  └─ 📁 drake_urdf/urdf/
+│     └─ 📄 biped_v3_arm.urdf       机器人模型定义
+│
+├─ 📄 使用指南.txt                   完整使用说明
+├─ 📄 学习笔记.txt                   学习笔记模板
+└─ 📄 学习路线图.txt                 学习路径指引
+
+
+【关键函数速查】
+================================================================================
+
+1️⃣  IKAnalytical.compute()  [ik_library.py:172-253]
+   功能: IK求解（解析解）
+   调用: 
+     joints = IKAnalytical.compute(
+         eef_pos=[x,y,z],
+         eef_quat_xyzw=[qx,qy,qz,qw],
+         eef_frame='zarm_l7_link',
+         model_type='46',
+         limit=True
+     )
+
+2️⃣  FKTool.compute()  [fk_tool.py:26-42]
+   功能: FK计算（验证IK结果）
+   调用:
+     fk = FKTool()
+     pos, quat = fk.compute(
+         q=joint_angles,
+         frame_name='zarm_l7_link'
+     )
+
+3️⃣  ik_leftarm_loop()  [ik_library.py:151-169]
+   功能: 迭代优化IK解
+   内部调用，一般不直接使用
+
+4️⃣  ik_leftarm_w_err()  [ik_library.py:102-135]
+   功能: 解析解核心算法
+   内部调用，算法实现细节
+
+5️⃣  IKNumerical.compute()  [ik_library.py:279-348]
+   功能: IK求解（数值优化解）
+   使用场景: 需要更高精度时
+
+
+【代码行号速查】
+================================================================================
+
+ik_library.py:
+  1-96    辅助函数和参数定义
+  10-37   transfer_l7_eef_to_l7() - 坐标系转换
+  39-52   transform_*_rotation() - 变换矩阵构造
+  79-81   机械臂几何参数 (l_34, l_45, offset_theta_4)
+  87-96   关节限位定义 (joint_limits)
+  
+  99-254  IKAnalytical类（解析解）
+    102-135  ik_leftarm_w_err() - 解析解核心
+    138-148  fk_leftarm() - 内部FK
+    151-169  ik_leftarm_loop() - 迭代优化
+    172-253  compute() - 对外接口⭐
+    
+  256-349 IKNumerical类（数值解）
+    279-348  compute() - 数值解接口
+
+fk_tool.py:
+  15-24   __init__() - 加载URDF模型
+  26-42   compute() - FK计算主函数⭐
+  45-51   load_plant_from_urdf() - 加载模型
+  54-72   set_joint_positions() - 设置关节角
+  74-97   _compute_fk() - Drake底层FK
+
+
+【重要参数速查】
+================================================================================
+
+机器人型号参数 (l1_link_in_base):
+  型号46: [-0.0174999, 0.2927, 0.445]  ← 你的机器人
+  型号45: [-0.017, 0.293, 0.424]
+  型号60: [-0.018, 0.255, 0.192]
+
+几何参数:
+  l_34 = 0.2837m         # 关节3-4之间的等效长度
+  l_45 = 0.2335m         # 关节4-5之间的等效长度
+  offset_theta_4 = ...   # 关节4的几何偏移
+
+关节限位 (弧度):
+  joint_1: [-180°,  90°]  = [-3.14, 1.57]
+  joint_2: [ -20°, 120°]  = [-0.35, 2.09]
+  joint_3: [ -90°,  90°]  = [-1.57, 1.57]
+  joint_4: [-150°,   0°]  = [-2.62, 0.00]
+  joint_5: [ -90°,  90°]  = [-1.57, 1.57]
+  joint_6: [ -75°,  40°]  = [-1.31, 0.70]
+  joint_7: [-110°,  60°]  = [-1.92, 1.05]
+
+
+【数据流程图】
+================================================================================
+
+IK求解流程:
+  
+  用户输入
+    ↓
+  [eef_pos, eef_quat_xyzw, eef_frame]
+    ↓
+  ┌────────────────────────────────┐
+  │ IKAnalytical.compute()         │
+  ├────────────────────────────────┤
+  │ 1. 右手→左手镜像（如果是右手）   │
+  │ 2. base_link → l1_link 转换    │
+  │ 3. 调用 ik_leftarm_loop()      │
+  │ 4. 关节限位检查                 │
+  │ 5. 左手→右手转换（如果是右手）   │
+  └────────────────────────────────┘
+    ↓
+  [θ1, θ2, θ3, θ4, θ5, θ6, θ7]
+    ↓
+  机器人控制器
+
+
+FK验证流程:
+
+  关节角
+    ↓
+  [θ1, θ2, θ3, θ4, θ5, θ6, θ7]
+    ↓
+  ┌────────────────────────────────┐
+  │ FKTool.compute()               │
+  ├────────────────────────────────┤
+  │ 1. 设置关节角到Drake context   │
+  │ 2. Drake计算坐标系变换         │
+  │ 3. 提取位置和姿态              │
+  └────────────────────────────────┘
+    ↓
+  [eef_pos, eef_quat]
+    ↓
+  与目标对比，计算误差
+
+
+【关键算法调用链】
+================================================================================
+
+compute() 
+  └→ ik_leftarm_loop()  # 迭代优化，默认10次
+      ├→ ik_leftarm_w_err()  # 解析解核心算法
+      └→ fk_leftarm()  # 内部FK验证误差
+
+详细展开:
+  compute(pos, quat, frame)
+    ├─ 镜像: 右手→左手
+    ├─ 转换: base→l1坐标
+    ├─ ik_leftarm_loop(X_07)
+    │   └─ for i in range(10):
+    │       ├─ thetas = ik_leftarm_w_err(X_07_tmp)
+    │       │   ├─ 计算肘关节角 (余弦定理)
+    │       │   ├─ 计算前3个关节角
+    │       │   └─ 计算后3个关节角 (欧拉角)
+    │       ├─ X_fk = fk_leftarm(thetas)
+    │       │   └─ X_07 = X_01@X_12@...@X_67
+    │       └─ err = X_fk - X_07
+    ├─ 限位: clip(thetas, limits)
+    └─ 镜像: 左手→右手
+    
+
+【坐标系关系】
+================================================================================
+
+base_link (机器人基座)
+  └─ zarm_l1_link (左肩)  [offset: l1_link_in_base]
+      └─ zarm_l2_link
+          └─ zarm_l3_link
+              └─ zarm_l4_link (肘)
+                  └─ zarm_l5_link
+                      └─ zarm_l6_link
+                          └─ zarm_l7_link (手腕) ← IK计算这里的位姿
+
+
+【典型代码模式】
+================================================================================
+
+模式1: 基本IK求解
+  from kuavo_ik.ik_library import IKAnalytical
+  joints = IKAnalytical.compute(pos, quat, 'zarm_l7_link', '46', True)
+
+模式2: IK + FK验证
+  from kuavo_ik.ik_library import IKAnalytical
+  from kuavo_ik.fk_tool import FKTool
+  
+  joints = IKAnalytical.compute(...)
+  fk = FKTool()
+  fk_pos, fk_quat = fk.compute(joints, 'zarm_l7_link')
+  error = np.linalg.norm(fk_pos - target_pos)
+
+模式3: 批量检查可达性
+  from check_reachability import ReachabilityChecker
+  
+  checker = ReachabilityChecker('46')
+  poses = [(pos1, euler1, "desc1"), ...]
+  results = checker.batch_check(poses, 'zarm_l7_link')
+
+模式4: 欧拉角↔四元数转换
+  from scipy.spatial.transform import Rotation as R
+  
+  # 欧拉角→四元数
+  quat = R.from_euler('xyz', [roll, pitch, yaw]).as_quat()
+  
+  # 四元数→欧拉角
+  euler = R.from_quat([qx, qy, qz, qw]).as_euler('xyz')
+
+
+【调试技巧】
+================================================================================
+
+1. 打开详细输出:
+   编辑 ik_library.py，第7行改为: VERBOSE = True
+
+2. 添加调试打印:
+   在关键位置添加:
+     print(f"Debug: variable = {variable}")
+
+3. 查看中间变量:
+   在ipython中逐步执行:
+     from kuavo_ik.ik_library import IKAnalytical
+     import numpy as np
+     # ... 逐行执行
+
+4. 可视化FK结果:
+   运行 example/visualize_traj.py 查看轨迹
+
+5. 检查关节限位:
+   from kuavo_ik.ik_library import joint_limits
+   print(joint_limits)
+
+
+【常见错误排查】
+================================================================================
+
+错误1: "target too long" 或 IK失败
+  原因: 目标位置超出工作空间
+  解决: 调整位置到可达范围内 (X:0.2-0.6, Y:-0.1-0.5, Z:0.2-0.8)
+
+错误2: 关节角超限
+  原因: IK解超出物理限位
+  解决: 调整目标姿态或位置，或设置 limit=True
+
+错误3: FK验证误差大
+  原因: IK解不精确或目标不可达
+  解决: 尝试调整位姿或使用IKNumerical
+
+错误4: ImportError
+  原因: 环境缺少依赖
+  解决: 确认numpy, scipy, pydrake已安装
+
+错误5: Gimbal Lock警告
+  原因: 欧拉角特定姿态的数学特性
+  解决: 正常现象，不影响结果，可忽略
+
+
+【性能优化】
+================================================================================
+
+1. 优先使用IKAnalytical（快）
+   只在需要高精度时用IKNumerical
+
+2. 减少FK验证调用
+   批量计算时可以抽样验证
+
+3. 复用FKTool实例
+   fk = FKTool()  # 只创建一次
+   for pos in positions:
+       ...  # 重复使用fk
+
+4. 预计算可达工作空间
+   离线验证，运行时查表
+
+
+【学习资源】
+================================================================================
+
+内置文档:
+  - 使用指南.txt  ← 完整使用说明
+  - 学习路线图.txt  ← 学习路径
+  - 学习笔记.txt  ← 笔记模板
+
+示例代码:
+  - MY_TEST.py  ← 最简单示例
+  - test_ik_basic.py  ← 基础学习
+  - example/read_datasets_and_save_traj.py  ← 实际应用
+
+外部资源:
+  - Drake: https://drake.mit.edu/
+  - URDF: http://wiki.ros.org/urdf
+  - scipy.spatial.transform: 
+    https://docs.scipy.org/doc/scipy/reference/spatial.transform.html
+
+================================================================================

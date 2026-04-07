@@ -1,0 +1,1 @@
+tools/setup-kuavo-ros-control.sh statics/setup-kuavo-ros-control.sh application/x-sh

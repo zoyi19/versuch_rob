@@ -1,0 +1,72 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- 输出日志格式 -->
+    <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
+
+    <!-- 参数定义 -->
+    <arg name="robot_version" default="$(optenv ROBOT_VERSION 13)"/>
+    <arg name="mode" default="real"/> <!-- sim, real -->
+    <arg name="test_mode" default="0"/> <!-- 0: 全身, 1: 腿部, 2: 手臂 -->
+    <arg name="fixed_base" default="true"/>
+    
+    <!-- 设置环境变量 -->
+    <env name="ROBOT_VERSION" value="$(arg robot_version)"/>
+    
+    <!-- 设置全局参数 -->
+    <param name="robot_version" value="$(arg robot_version)"/>
+    <param name="mode" value="$(arg mode)"/>
+    
+    <!-- 根据模式启动不同的环境 -->
+    <group if="$(eval mode == 'sim')">
+        <!-- 仿真模式：启动MuJoCo仿真环境 -->
+        <param name="use_mujoco" value="true"/>
+        
+        <!-- 设置MuJoCo半身模式参数（固定躯干和腿部，只测试上半身）-->
+        <param name="only_half_up_body" value="$(arg fixed_base)"/>
+        <param name="mujoco_fixed_base" value="$(arg fixed_base)"/>
+        
+        <!-- 加载机器人版本管理 -->
+        <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
+            <arg name="robot_version" value="$(arg robot_version)"/>
+            <arg name="rviz" value="false"/>
+        </include>
+
+        <!-- nodelet manager -->
+        <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" 
+           output="screen" required="true" clear_params="true">
+            <param name="num_worker_threads" type="int" value="10" />
+        </node>
+
+        <!-- 启动MuJoCo仿真环境 -->
+        <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch"/>
+        
+        <!-- 启动仿真节点 -->
+        <node name="motorFollowTestSim" pkg="hardware_node" type="motorFollowTestSim" output="screen">
+            <param name="is_real" value="false"/>
+            <param name="use_mujoco" value="true"/>
+            <param name="robot_version" value="$(arg robot_version)"/>
+            <param name="test_mode" value="$(arg test_mode)"/>
+            <param name="joint_control_config_file" value="$(find hardware_node)/src/tests/motorTest/config/joint_control_params_v$(arg robot_version).json"/>
+        </node>
+    </group>
+    
+    <group if="$(eval mode == 'real')">
+        <!-- 实物模式：启动硬件接口 -->
+        <param name="is_real" value="true"/>
+        
+        <!-- 加载机器人版本管理 -->
+        <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
+            <arg name="robot_version" value="$(arg robot_version)"/>
+            <arg name="rviz" value="false"/>
+        </include>
+        
+        <!-- 启动实物节点 -->
+        <node name="motorFollowTest" pkg="hardware_node" type="motorFollowTest" output="screen">
+            <param name="is_real" value="true"/>
+            <param name="use_mujoco" value="false"/>
+            <param name="robot_version" type="int" value="$(arg robot_version)"/>
+            <param name="test_mode" type="int" value="$(arg test_mode)"/>
+            <param name="joint_control_config_file" value="$(find hardware_node)/src/tests/motorTest/config/joint_control_params_v$(arg robot_version).json"/>
+        </node>
+    </group>
+</launch>

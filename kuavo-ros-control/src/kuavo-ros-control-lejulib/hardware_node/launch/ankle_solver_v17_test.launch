@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- 输出日志格式 -->
+    <env name="ROSCONSOLE_FORMAT" value="[${severity}][${time:%Y-%m-%d %H:%M:%S}][${node}]: ${message}"/>
+
+    <!-- 参数定义 -->
+    <!-- test_type: 0=位置, 1=速度, 2=力矩, 3=依次跑全部(位置→速度→力矩) -->
+    <arg name="robot_version" default="$(optenv ROBOT_VERSION 17)"/>
+    <arg name="test_type" default="2"/> <!-- 3 可一次跑完位置+速度+力矩 -->
+    <arg name="ankle_test_foot" default="0"/> <!-- 0: both_same, 1: left_only, 2: right_only, 3: both_separate -->
+
+    <!-- 设置环境变量 -->
+    <env name="ROBOT_VERSION" value="$(arg robot_version)"/>
+
+    <!-- 加载机器人版本管理（提供 repo_root_path 等参数）-->
+    <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
+        <arg name="robot_version" value="$(arg robot_version)"/>
+        <arg name="rviz" value="false"/>
+    </include>
+
+    <!-- 脚踝解算验证测试节点 -->
+    <node name="ankle_solver_v17_test" pkg="hardware_node" type="ankle_solver_v17_test" output="screen" required="true">
+        <param name="robot_version" type="int" value="$(arg robot_version)"/>
+        <param name="test_type" type="int" value="$(arg test_type)"/>
+        <param name="ankle_test_foot" type="int" value="$(arg ankle_test_foot)"/>
+    </node>
+</launch>

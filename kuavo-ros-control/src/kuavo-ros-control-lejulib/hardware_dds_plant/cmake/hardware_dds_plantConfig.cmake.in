@@ -1,0 +1,13 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Find required dependencies
+find_dependency(CycloneDDS-CXX REQUIRED)
+find_dependency(hardware_plant REQUIRED)
+find_dependency(Eigen3 REQUIRED)
+
+# Include the targets file
+include("${CMAKE_CURRENT_LIST_DIR}/hardware_dds_plantTargets.cmake")
+
+check_required_components(hardware_dds_plant)

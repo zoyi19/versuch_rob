@@ -1,0 +1,1 @@
+python3 replay_umi_in_mujoco.py   --pkl ../data/output/新片段_in_base.pkl   --incremental --rate 20 --speed 0.5 --no-gripper --no-orient

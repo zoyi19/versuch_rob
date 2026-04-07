@@ -1,0 +1,3 @@
+<launch>
+    <node name="roban_head_controller" pkg="hardware_node" type="head_controller_node.py" output="screen"/>
+</launch>

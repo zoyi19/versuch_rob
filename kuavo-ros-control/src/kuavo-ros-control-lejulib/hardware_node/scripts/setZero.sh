@@ -1,0 +1,1 @@
+../../hardware_plant/lib/ruiwo_controller/setZero.sh

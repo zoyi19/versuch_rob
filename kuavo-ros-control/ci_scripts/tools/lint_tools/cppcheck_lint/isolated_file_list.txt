@@ -1,0 +1,14 @@
+# 用 # 注释可以不被检测
+# 无需担心有空行 和 最后一行是否有换行符
+
+# 功能：用于屏蔽某些文件被检测
+# 使用方法举例：包名，某段路径，某个文件。错误名字检测不到
+
+# mujoco_cpp
+# humanoid_interface_drake/src/
+# mujoco_cpp/src/main.cc
+
+elevation_mapping
+openmesh
+third_party_libs
+protos_c

@@ -1,0 +1,18 @@
+{
+  "gripper_id": 0,
+  "left_finger_tag_id": 0,
+  "right_finger_tag_id": 1,
+  "max_width": 0.13227785913651524,
+  "min_width": 0.029912612788376456,
+  "nominal_z": 0.08815988370259352,
+  "z_tolerance": 0.015,
+  "valid_frames": 473,
+  "total_frames": 503,
+  "camera_intrinsics": {
+    "fx": 425.0,
+    "fy": 425.0,
+    "cx": 424.0,
+    "cy": 240.0,
+    "resolution": "848x480"
+  }
+}

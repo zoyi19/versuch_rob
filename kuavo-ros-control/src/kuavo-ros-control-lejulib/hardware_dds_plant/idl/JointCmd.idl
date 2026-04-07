@@ -1,0 +1,17 @@
+module leju {
+  module msgs {
+    @final
+    struct JointCmd {
+      int32 header_sec;
+      uint32 header_nanosec;
+      sequence<double> joint_q;
+      sequence<double> joint_v;
+      sequence<double> tau;
+      sequence<double> tau_max;
+      sequence<double> tau_ratio;
+      sequence<double> joint_kp;
+      sequence<double> joint_kd;
+      sequence<int32> control_modes;
+    };
+  };
+};

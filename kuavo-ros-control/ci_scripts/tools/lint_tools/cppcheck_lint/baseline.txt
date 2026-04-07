@@ -1,0 +1,6 @@
+information: 217
+error: 70
+warning: 618
+style: 7498
+performance: 74
+portability: 71

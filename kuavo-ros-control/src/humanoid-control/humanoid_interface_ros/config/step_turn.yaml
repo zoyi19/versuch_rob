@@ -1,0 +1,31 @@
+# 单步转向区间配置
+# 只配置左转区间，右转区间会自动对称生成
+# 左转区间：负值范围 (-1.0 ~ 0.0)
+# 简化配置：只需配置 min_value, max_value 和 body_yaw
+
+
+# 转向区间数量
+turn_zones_count: 4
+
+# 左转区间配置列表
+left_turn_zones:
+  # 左转区间0: 小角度左转 (-0.15 ~ 0.0)
+  - min_value: -0.15
+    max_value: 0.0
+    body_yaw: 10.0
+
+  # 左转区间1: 小角度左转 (-0.45 ~ -0.15)
+  - min_value: -0.45
+    max_value: -0.15
+    body_yaw: 20.0
+
+  # 左转区间2: 中角度左转 (-0.75 ~ -0.451)
+  - min_value: -0.75
+    max_value: -0.451
+    body_yaw: 30.0
+
+  # 左转区间3: 大角度左转 (-1.0 ~ -0.751)
+  - min_value: -1.0
+    max_value: -0.751
+    body_yaw: 45.0
+

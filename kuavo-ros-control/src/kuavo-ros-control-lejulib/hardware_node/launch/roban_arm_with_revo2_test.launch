@@ -1,0 +1,19 @@
+<?xml version="1.0" ?>
+<launch>
+    <!--
+    Roban2 Arm with Revo2 Hand CAN Bus Integration Test Launch File
+
+    该启动文件用于启动Roban2机械臂与Revo2灵巧手的集成测试节点，
+    验证机械臂和灵巧手在同一CAN总线上的通信和控制。
+
+    Parameters:
+    - cali_arm: Enable arm calibration (default: false)
+    -->
+
+    <arg name="cali_arm"  default="false" doc="Enable arm calibration" />
+
+    <param name="cali_arm"  value="$(arg cali_arm)"/>
+
+    <node pkg="hardware_node" type="roban_arm_with_revo2_test" name="roban_arm_with_revo2_test" output="screen"  required="true">
+    </node>
+</launch>

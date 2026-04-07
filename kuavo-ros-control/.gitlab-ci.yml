@@ -1,0 +1,1105 @@
+variables:
+  # 在项目目录下为每个 Job 单独创建一个 tmp/${CI_JOB_ID} 目录
+  JOB_TMP_DIR: "${CI_PROJECT_DIR}/tmp/${CI_JOB_ID}/artifacts/"
+  auto_test_grab_box_log_path: "${JOB_TMP_DIR}/auto_test_grab_box"
+  auto_test_trace_path_log_path: "${JOB_TMP_DIR}/auto_test_trace_path"
+  auto_test_arm_ik_log_path: "${JOB_TMP_DIR}/auto_test_arm_ik_sim"
+  # 基于 CI_JOB_ID 的独立缓存目录
+  CATKIN_WS_INSTALL_CACHE: "/home/carlos/CI/jobs_results/${CI_PIPELINE_ID}/catkin_ws_install"
+
+workflow:
+  rules:
+    # 定时任务流水线始终运行
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    # Tag 流水线始终运行（用于发布 SDK 等）
+    - if: $CI_COMMIT_TAG
+    # 受保护分支在 push 时始终运行，保持原有行为
+    - if: $CI_COMMIT_BRANCH == "master"
+    - if: $CI_COMMIT_BRANCH == "beta"
+    - if: $CI_COMMIT_BRANCH == "dev"
+    - if: $CI_COMMIT_BRANCH =~ /^opensource.*/
+    # Draft 状态的 MR 不触发 CI
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TITLE =~ /^(\[Draft\]|\(Draft\)|Draft:)/
+      when: never
+    # 其他分支只在创建 Merge Request 时才触发 CI
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+.ros_before_script:
+  stage: ros_before_script
+  before_script:
+    - export ROBOT_VERSION=34
+    - export LD_LIBRARY_PATH="/opt/drake/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    - export PATH="/opt/drake/bin${PATH:+:${PATH}}"
+    - export CC="ccache gcc"
+    - export CXX="ccache g++"
+    - ccache --max-size=10G
+    - export ROBOT_VERSION=40
+    - export PROJECT_VERSION_VAR=$(git describe)
+  tags:
+    - ocs2
+
+.build_before_other_jobs:
+  stage: build_before_other_jobs
+  before_script:
+    - git clean -xdf
+    - mkdir -p $JOB_TMP_DIR
+    - mkdir -p $auto_test_grab_box_log_path
+    - mkdir -p $auto_test_trace_path_log_path
+    - mkdir -p $auto_test_arm_ik_log_path
+    - export ROBOT_VERSION=34
+    - export LD_LIBRARY_PATH="/opt/drake/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    - export PATH="/opt/drake/bin${PATH:+:${PATH}}"
+    - export CC="ccache gcc"
+    - export CXX="ccache g++"
+    - ccache --max-size=10G
+    - export ROBOT_VERSION=40
+    - export PROJECT_VERSION_VAR=$(git describe)
+    - echo "Sync opensource git remotes"
+    - cd $CI_PROJECT_DIR
+    - bash $CI_PROJECT_DIR/ci_scripts/git_fetch_opensource.sh
+    - echo "Compiling..."
+    - cd $CI_PROJECT_DIR
+    - |
+      # 检查是否存在有效的缓存
+      if [ -d "$CATKIN_WS_INSTALL_CACHE/installed" ] && [ -f "$CATKIN_WS_INSTALL_CACHE/installed/setup.bash" ] && [ -d "$CATKIN_WS_INSTALL_CACHE/installed/lib" ]; then
+        echo "Found valid cache at $CATKIN_WS_INSTALL_CACHE, copying instead of compiling..."
+        rm -rf $CI_PROJECT_DIR/installed
+        mkdir -p $CI_PROJECT_DIR/installed
+        cp -r "$CATKIN_WS_INSTALL_CACHE/installed"/* $CI_PROJECT_DIR/installed/
+        echo "Cache copy completed, skipping compilation and strip operations"
+      else
+        echo "No valid cache found at $CATKIN_WS_INSTALL_CACHE, proceeding with compilation..."
+        git submodule update --init --recursive --force
+        cd ci_scripts
+        sudo chmod +x build.sh
+        rm -rf $CI_PROJECT_DIR/installed
+        mkdir -p $CI_PROJECT_DIR/installed
+        ./build.sh -j6 -l6
+        cd $CI_PROJECT_DIR
+        rm -rf src/manipulation_nodes/motion_capture_ik
+        if [[ "$CI_COMMIT_BRANCH" == "master" || "$CI_COMMIT_BRANCH" == "beta" || "$CI_COMMIT_BRANCH" == "dev" || "$CI_COMMIT_BRANCH" =~ ^opensource.* ]]; then
+          unset https_proxy http_proxy all_proxy
+          bash ./ci_scripts/extract_strip_upload_debinfo.sh
+        else
+          echo "Skipping extract_strip_upload_debinfo.sh on branch $CI_COMMIT_BRANCH"
+        fi
+        cd $CI_PROJECT_DIR/installed/lib && strip --strip-unneeded *.a *.so && cd -
+        mkdir -p $CATKIN_WS_INSTALL_CACHE
+        rm -rf $CATKIN_WS_INSTALL_CACHE/*
+        cp -r $CI_PROJECT_DIR/installed $CATKIN_WS_INSTALL_CACHE
+      fi
+  tags:
+    - ocs2
+
+.nodejs_before_script:
+  stage: nodejs_before_script
+  before_script:
+    - export PATH=~/.nvm/versions/node/v18.19.1/bin:$PATH
+    - export LC_ALL=en_US.UTF-8
+    - export LANG=en_US.UTF-8
+    - export LANGUAGE=en_US.UTF-8
+    - export NEWLINE=$'\n'
+  tags:
+    - macmini1
+
+stages:
+  - cleanup
+  - cpp_lint
+  - ros_before_script
+  - setup_env
+  - compile
+  - build_before_other_jobs
+  - clone_opensource_project
+  - pull_opensource_project
+  - sync_to_opensource
+  - sync_hardware_lib
+  - sync_kuavo_msgs_to_ros2
+  - sync_kuavo_msgs_to_split_repo
+  - sync_to_kuavo_rl
+  - compile_docs
+  - sync_docs
+  - sync_tools
+  - sync_tags
+  - publish_sdk
+  - publish_joint_cali
+  - notify
+  - notify_failure
+
+auto_test_grab_box_atomic_skill_schedule:
+  stage: compile
+  tags:
+    - ci_grab_box_sim # Or a specific runner tag if needed
+  script:
+    - chmod a+x ci_scripts/automatic_tests/grab_box_sim/grab_box_sim_test.sh
+    - bash ci_scripts/automatic_tests/grab_box_sim/grab_box_sim_test.sh
+  artifacts:
+    paths:
+      - $auto_test_grab_box_log_path/*
+    when: always
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"            # 计划流水线条件
+      when: always                                     # 总是执行
+
+auto_test_grab_box_atomic_skill_only4test_branch:
+  stage: compile
+  tags:
+    - ci_grab_box_sim # Or a specific runner tag if needed
+  script:
+    - chmod a+x ci_scripts/automatic_tests/grab_box_sim/grab_box_sim_test.sh
+    - bash ci_scripts/automatic_tests/grab_box_sim/grab_box_sim_test.sh
+  artifacts:
+    paths:
+      - $auto_test_grab_box_log_path/*
+    when: always
+    expire_in: 30 days
+  rules:
+    - if: $CI_COMMIT_BRANCH =~ /^test-ci-grab-box.*/
+    - if: $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^test-ci-grab-box.*/
+
+auto_test_trace_path_atomic_skill_schedule:
+  stage: compile
+  tags:
+    - ci_trace_path_sim # Or a specific runner tag if needed
+  script:
+    - chmod a+x ci_scripts/automatic_tests/trace_path_sim/trace_path_sim_test.sh
+    - bash ci_scripts/automatic_tests/trace_path_sim/trace_path_sim_test.sh
+  artifacts:
+    paths:
+      - $auto_test_trace_path_log_path/*
+    when: always
+    expire_in: 30 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && ($CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "beta" || $CI_COMMIT_BRANCH == "dev")'
+      when: always                                     # 总是执行
+
+auto_test_trace_path_atomic_skill_only4test_branch:
+  stage: compile
+  tags:
+    - ci_trace_path_sim # Or a specific runner tag if needed
+  script:
+    - chmod a+x ci_scripts/automatic_tests/trace_path_sim/trace_path_sim_test.sh
+    - bash ci_scripts/automatic_tests/trace_path_sim/trace_path_sim_test.sh
+  artifacts:
+    paths:
+      - $auto_test_trace_path_log_path/*
+    when: always
+    expire_in: 30 days
+  rules:
+    - if: $CI_COMMIT_BRANCH =~ /^test-ci-trace-path.*/
+    - if: $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^test-ci-trace-path.*/
+
+auto_test_arm_ik_sim_schedule:
+  stage: compile
+  tags:
+    - ci_trace_path_sim
+  script:
+    - chmod a+x ci_scripts/automatic_tests/arm_ik_sim/arm_ik_sim_test.sh
+    - bash ci_scripts/automatic_tests/arm_ik_sim/arm_ik_sim_test.sh
+  artifacts:
+    paths:
+      - $auto_test_arm_ik_log_path/*
+    when: always
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: always
+
+auto_test_arm_ik_sim_only4test_branch:
+  stage: compile
+  tags:
+    - ci_trace_path_sim
+  script:
+    - chmod a+x ci_scripts/automatic_tests/arm_ik_sim/arm_ik_sim_test.sh
+    - bash ci_scripts/automatic_tests/arm_ik_sim/arm_ik_sim_test.sh
+  artifacts:
+    paths:
+      - $auto_test_arm_ik_log_path/*
+    when: always
+    expire_in: 30 days
+  rules:
+    - if: $CI_COMMIT_BRANCH =~ /^test-ci-arm-ik.*/
+    - if: $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^test-ci-arm-ik.*/
+
+cleanup_ros_logs:
+  stage: cleanup
+  tags:
+    - ocs2
+  script:
+    - |
+      for dir in /home/leju/.ros /home/gitlab-ruuner/.ros; do
+        if [ -d "$dir" ]; then
+          echo "Cleaning old files in $dir"
+          # -mindepth 1 保证不删除 .ros 自身
+          # -mtime +7 匹配修改时间在 7 天以前的文件或目录
+          # -exec rm -rf {} + 批量删除
+          find "$dir" -mindepth 1 -mtime +7 -exec rm -rf {} +
+        else
+          echo "Directory $dir not found, skipping."
+        fi
+      done
+    - |
+      # 清理过期的 CI 缓存目录（7天前的）
+      if [ -d "/home/carlos/CI/jobs_results" ]; then
+        echo "Cleaning old CI cache directories in /home/carlos/CI/jobs_results"
+        find "/home/carlos/CI/jobs_results" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} +
+      else
+        echo "CI cache directory /home/carlos/CI/jobs_results not found, skipping."
+      fi
+  
+publish_joint_cali_program:
+  stage: publish_joint_cali
+  tags: 
+    - ocs2
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "beta" || $CI_COMMIT_BRANCH == "dev"
+      changes:
+        - scripts/joint_cali/**          # 监听这个目录的改动
+    # 其余情况不运行
+    - when: never
+
+  script:
+    - set -euo pipefail
+    - echo "Publish joint cali..."
+    - cd scripts/joint_cali
+    - chmod +x pack.sh
+    - ./pack.sh
+    - echo "kuavo_joint_cali_standalone info"
+    - cat build_info.json || true
+    - echo "Publish joint cali program"
+    - cd dist
+    - VERSION=$(git describe)
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "master" ]; then
+        FILENAME_SUFFIX="${VERSION}"
+        LATEST_SUFFIX="latest"
+      else
+        FILENAME_SUFFIX="${VERSION}-${CI_COMMIT_BRANCH}"
+        LATEST_SUFFIX="latest-${CI_COMMIT_BRANCH}"
+      fi
+    - echo "正在重命名并上传版本 ${FILENAME_SUFFIX} 的 kuavo_joint_cali_standalone 到七牛云服务"
+    - mv kuavo_joint_cali_standalone kuavo_joint_cali_standalone-${FILENAME_SUFFIX}
+    - qshell rput --overwrite kuavo statics/kuavo_joint_cali_standalone-${FILENAME_SUFFIX} ./kuavo_joint_cali_standalone-${FILENAME_SUFFIX}
+    - qshell rput --overwrite kuavo statics/kuavo_joint_cali_standalone-${LATEST_SUFFIX} ./kuavo_joint_cali_standalone-${FILENAME_SUFFIX}
+    - if [ $? -ne 0 ]; then echo "Upload of version ${VERSION} failed in publish_joint_cali_program stage"; exit 1; fi
+    - cd $CI_PROJECT_DIR/ci_scripts
+    - sudo chmod +x wechat_bot_notify.sh
+    - ./wechat_bot_notify.sh "关节标零程序 ${FILENAME_SUFFIX} 已发布到七牛云，下载地址 https://kuavo.lejurobot.com/statics/kuavo_joint_cali_standalone-${FILENAME_SUFFIX}" "$WECHAT_BOT_TOKEN"
+
+cpp_lint:
+  stage: cpp_lint
+  tags:
+    - ocs2
+  script:
+    - cd $CI_PROJECT_DIR/ci_scripts/tools/lint_tools/cppcheck_lint
+    - bash cppcheck_lint_tool_xml.sh $CI_PROJECT_DIR
+    - python3 count_severity.py ./cppcheck_results/cppcheck_report.xml baseline.txt
+  artifacts:
+    paths:
+      - ci_scripts/tools/lint_tools/cppcheck_lint/cppcheck_results/cppcheck_report.xml
+    when: always
+    expire_in: 30 days
+
+
+setup_env:
+  stage: setup_env
+  extends: .ros_before_script
+  tags:
+    - ocs2
+  script:
+    - ccache -s
+    - ccache --set-config compiler_check=content
+    - echo "Setup environment..."
+    - cd ci_scripts
+    - sudo chmod +x ci_install_dependencies.bash
+    - ./ci_install_dependencies.bash
+
+compile:
+  stage: compile
+  extends: .ros_before_script
+  tags:
+    - ocs2
+  extends: .build_before_other_jobs
+  retry:
+    max: 2
+    when:
+      - script_failure
+      - unknown_failure
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+      when: never
+    - if: $CI_COMMIT_BRANCH == "beta"
+      when: never
+    - if: $CI_COMMIT_BRANCH =~ /^opensource.*/
+      when: never
+    - if: $CI_COMMIT_BRANCH == "master"
+      when: never
+    - when: on_success
+  script:
+    - echo "Compiled :) "
+  dependencies:
+    - setup_env
+
+clone_source_code_of_opensource_project:
+  stage: clone_opensource_project
+  extends: .ros_before_script
+  tags:
+    - ocs2
+  script:
+    - mkdir -p $temp_target_repo_path
+    - cd $temp_target_repo_path
+    - git clone $opensource_project_origin git_repo || echo "After clone"
+  only:
+    - dev
+    - beta
+    - master
+    - /^opensource.*/
+
+clone_source_code_of_github_project:
+  stage: clone_opensource_project
+  extends: .ros_before_script
+  tags:
+    - ocs2
+  script:
+    - mkdir -p $temp_target_repo_path_github
+    - cd $temp_target_repo_path_github
+    - git clone $opensource_project_origin_github git_repo || echo "After clone github"
+  only:
+    - dev
+    - beta
+    - /^opensource.*/
+    - master
+
+
+sync_to_gitee:
+  stage: sync_to_opensource
+  extends: .build_before_other_jobs
+  tags:
+    - ocs2
+  script:
+    - echo "Sync to gitee..."
+    - cd $CI_PROJECT_DIR
+    - |
+      # Retry function with exponential backoff
+      retry_git_command() {
+        local cmd="$1"
+        local max_attempts=10
+        local attempt=1
+        while [ $attempt -le $max_attempts ]; do
+          echo "Attempt $attempt/$max_attempts: $cmd"
+          if eval "$cmd"; then
+            echo "Command succeeded on attempt $attempt"
+            return 0
+          else
+            if [ $attempt -eq $max_attempts ]; then
+              echo "Command failed after $max_attempts attempts"
+              return 1
+            fi
+            local delay=$((2**attempt))
+            echo "Command failed, retrying in $delay seconds..."
+            sleep $delay
+            attempt=$((attempt + 1))
+          fi
+        done
+      }
+    - cd $temp_target_repo_path/git_repo/
+    - git restore --staged .
+    - git clean -dfx && git checkout .
+    - retry_git_command "git fetch origin --prune"
+    - if git show-ref --verify --quiet refs/remotes/origin/$CI_COMMIT_BRANCH; then
+        echo "Remote branch $CI_COMMIT_BRANCH exists. Checking out.";
+        git checkout -B $CI_COMMIT_BRANCH origin/$CI_COMMIT_BRANCH;
+      else
+        echo "Remote branch $CI_COMMIT_BRANCH does not exist. Creating and pushing the branch.";
+        if git show-ref --verify --quiet refs/remotes/origin/main; then
+          git checkout -B $CI_COMMIT_BRANCH origin/main;
+        elif git show-ref --verify --quiet refs/remotes/origin/master; then
+          git checkout -B $CI_COMMIT_BRANCH origin/master;
+        elif git show-ref --verify --quiet refs/remotes/origin/dev; then
+          git checkout -B $CI_COMMIT_BRANCH origin/dev;
+        else
+          git checkout -b $CI_COMMIT_BRANCH;
+        fi;
+        retry_git_command "git push -uf origin $CI_COMMIT_BRANCH";
+      fi
+    - git reset --hard origin/$CI_COMMIT_BRANCH
+    - git restore --staged .
+    - git clean -df
+    - cd $CI_PROJECT_DIR
+    - git checkout src/manipulation_nodes/motion_capture_ik
+    - rm -rf docs_internal
+    - cd ci_scripts
+    - sudo chmod +x del_close_source_packs.sh
+    - ./del_close_source_packs.sh close_source_packs.txt
+    - cd ..
+    - rsync -av --delete --exclude='.git' . $temp_target_repo_path/git_repo 
+    - cd $temp_target_repo_path/git_repo
+    - sudo rm -rf installed
+    - mv readme_opensource.md readme.md
+    - cp -r $CATKIN_WS_INSTALL_CACHE/installed installed
+    - cd ci_scripts
+    - ./del_close_source_packs.sh close_source_packs.txt
+    - cd $temp_target_repo_path/git_repo
+    - source installed/setup.bash
+    - catkin build -j6 -l6 humanoid_controllers humanoid_plan_arm_trajectory planarmwebsocketservice gazebo_sim
+    - cd $temp_target_repo_path/git_repo
+    - catkin clean -d -b -L -y
+    - rm .gitlab-ci.yml
+    - rm -rf ci_scripts
+    - rm ./src/manipulation_nodes/motion_capture_ik/src/plantIK.cc
+    - python3 -c "import py_compile; py_compile.compile('src/manipulation_nodes/motion_capture_ik/scripts/ik/torso_ik.py', cfile='src/manipulation_nodes/motion_capture_ik/scripts/ik/torso_ik.pyc')" && rm src/manipulation_nodes/motion_capture_ik/scripts/ik/torso_ik.py && git add -f src/manipulation_nodes/motion_capture_ik/scripts/ik/torso_ik.pyc
+    ## after cleanup motion_capture_ik
+    - wget -qO - https://kuavo.lejurobot.com/statics/mit_license.txt | sed "s/<YEAR>/$(date +%Y)/g; s/<COPYRIGHT HOLDER>/Leju（Shenzhen）Robotics Co.Ltd./g" > LICENSE
+    - git add . && git add -u
+    - git commit -am "sync $CI_PROJECT_URL/commit/$CI_COMMIT_SHA " && retry_git_command "git push -f origin $CI_COMMIT_BRANCH"
+    - bash $CI_PROJECT_DIR/ci_scripts/sync_to_gitee.sh;
+    - cd $CI_PROJECT_DIR
+    - git restore --staged .
+    - git clean -dfx
+    - git checkout .
+
+  dependencies:
+    - clone_source_code_of_opensource_project
+  only:
+    - dev
+    - /^opensource.*/
+    - master
+    - beta
+
+sync_to_github:
+  stage: sync_to_opensource
+  extends: .build_before_other_jobs
+  tags:
+    - ocs2
+  script:
+    - echo "Sync to GitHub..."
+    - cd $CI_PROJECT_DIR
+    - |
+      # Retry function with exponential backoff
+      retry_git_command() {
+        local cmd="$1"
+        local max_attempts=10
+        local attempt=1
+        while [ $attempt -le $max_attempts ]; do
+          echo "Attempt $attempt/$max_attempts: $cmd"
+          if eval "$cmd"; then
+            echo "Command succeeded on attempt $attempt"
+            return 0
+          else
+            if [ $attempt -eq $max_attempts ]; then
+              echo "Command failed after $max_attempts attempts"
+              return 1
+            fi
+            local delay=$((2**attempt))
+            echo "Command failed, retrying in $delay seconds..."
+            sleep $delay
+            attempt=$((attempt + 1))
+          fi
+        done
+      }
+    - mkdir -p $temp_target_repo_path_github
+    - cd $temp_target_repo_path_github
+    - git clone $opensource_project_origin_github git_repo || echo "After clone github"
+    - cd $temp_target_repo_path_github/git_repo
+    - retry_git_command "git fetch origin"
+    - rm -rf installed
+    - git restore --staged .
+    - git clean -dfx && git checkout .
+    - if git show-ref --verify --quiet refs/remotes/origin/$CI_COMMIT_BRANCH; then
+        echo "Branch $CI_COMMIT_BRANCH exists on remote. Checking out.";
+        git restore --staged .;
+        git clean -dfx && git checkout .;
+        git checkout -B $CI_COMMIT_BRANCH origin/$CI_COMMIT_BRANCH;
+      else
+        echo "Branch $CI_COMMIT_BRANCH does not exist on remote. Creating new branch.";
+        if git show-ref --verify --quiet refs/heads/$CI_COMMIT_BRANCH; then
+          echo "Local branch $CI_COMMIT_BRANCH exists. Checking out and resetting.";
+          git checkout $CI_COMMIT_BRANCH;
+          git reset --hard HEAD;
+        else
+          echo "Creating new local branch $CI_COMMIT_BRANCH.";
+          if git show-ref --verify --quiet refs/remotes/origin/main; then
+            echo "Using origin/main as base branch";
+            git checkout -b $CI_COMMIT_BRANCH origin/main;
+          elif git show-ref --verify --quiet refs/remotes/origin/master; then
+            echo "Using origin/master as base branch";
+            git checkout -b $CI_COMMIT_BRANCH origin/master;
+          elif git show-ref --verify --quiet refs/remotes/origin/dev; then
+            echo "Using origin/dev as base branch";
+            git checkout -b $CI_COMMIT_BRANCH origin/dev;
+          else
+            echo "No priority base branch found, creating from HEAD";
+            git checkout -b $CI_COMMIT_BRANCH;
+          fi;
+        fi;
+      fi
+    - git reset --hard origin/$CI_COMMIT_BRANCH 2>/dev/null || echo "Branch doesn't exist on remote yet"
+    - git restore --staged .
+    - git clean -df
+    - cd $CI_PROJECT_DIR
+    - git checkout src/manipulation_nodes/motion_capture_ik
+    - rm -rf docs_internal
+    - cd ci_scripts
+    - sudo chmod +x del_close_source_packs.sh
+    - ./del_close_source_packs.sh close_source_packs.txt
+    - cd ..
+    - rsync -av --delete --exclude='.git' . $temp_target_repo_path_github/git_repo 
+    - cd $temp_target_repo_path_github/git_repo
+    - sudo rm -rf installed
+    - mv readme_opensource.md readme.md
+    - cp -r $CATKIN_WS_INSTALL_CACHE/installed installed
+    - cd ci_scripts
+    - ./del_close_source_packs.sh close_source_packs.txt
+    - cd $temp_target_repo_path_github/git_repo
+    - source installed/setup.bash
+    - catkin build -j6 -l6 humanoid_controllers humanoid_plan_arm_trajectory planarmwebsocketservice gazebo_sim
+    - cd $temp_target_repo_path_github/git_repo
+    - catkin clean -d -b -L -y
+    - rm .gitlab-ci.yml
+    - rm -rf ci_scripts
+    - rm ./src/manipulation_nodes/motion_capture_ik/src/plantIK.cc
+    - python3 -c "import py_compile; py_compile.compile('src/manipulation_nodes/motion_capture_ik/scripts/ik/torso_ik.py', cfile='src/manipulation_nodes/motion_capture_ik/scripts/ik/torso_ik.pyc')" && rm src/manipulation_nodes/motion_capture_ik/scripts/ik/torso_ik.py && git add -f src/manipulation_nodes/motion_capture_ik/scripts/ik/torso_ik.pyc
+    - echo "Checking for files larger than 80MB..."
+    - large_files=$(find . -type f -size +80M ! -path "./.git/*" 2>/dev/null)
+    - |
+      if [ -n "$large_files" ]; then
+        echo "Found files larger than 80MB that will be removed:"
+        echo "$large_files"
+        echo "$large_files" | while read -r file; do
+          if [ -f "$file" ]; then
+            file_size=$(du -h "$file" | cut -f1)
+            echo "Removing large file: $file (${file_size})"
+            rm -f "$file"
+          fi
+        done
+        echo "Completed removal of large files."
+      else
+        echo "No files larger than 80MB found."
+      fi
+    - git add . && git add -u
+    - git commit -am "sync $CI_PROJECT_URL/commit/$CI_COMMIT_SHA "
+    - retry_git_command "git push -f origin $CI_COMMIT_BRANCH"
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "master" ]; then
+        echo "Master branch detected, also pushing to main branch";
+        retry_git_command "git push -f origin HEAD:main";
+      fi
+    - bash $CI_PROJECT_DIR/ci_scripts/wechat_bot_notify.sh "OCS2 开源仓库(GitHub)分支 $CI_COMMIT_BRANCH 同步成功" "$WECHAT_BOT_TOKEN"
+    - cd $CI_PROJECT_DIR
+    - git restore --staged .
+    - git clean -dfx
+    - git checkout .
+  dependencies:
+    - clone_source_code_of_github_project
+  only:
+    - dev
+    - /^opensource.*/
+    - master
+    - beta
+
+sync_hardware_lib:
+  stage: sync_hardware_lib
+  extends: .ros_before_script
+  tags:
+    - ocs2
+  script:
+    - echo "Sync hardware_lib..."
+    - mkdir -p $kuavo_hardware_lib_repo_path
+    - cd $kuavo_hardware_lib_repo_path
+    - git clone $kuavo_hardware_lib_repo_url . || echo "After clone"
+    - git fetch origin
+    - if git show-ref --verify --quiet refs/remotes/origin/$CI_COMMIT_BRANCH; then
+        echo "Branch $CI_COMMIT_BRANCH exists. Checking out.";
+        git checkout -B $CI_COMMIT_BRANCH origin/$CI_COMMIT_BRANCH;
+      else
+        echo "Branch $CI_COMMIT_BRANCH does not exist. Creating and pushing the branch.";
+        git checkout -b $CI_COMMIT_BRANCH;
+        git push -u origin $CI_COMMIT_BRANCH;
+      fi
+    - git reset --hard origin/$CI_COMMIT_BRANCH
+    - git clean -df
+    - cd $CI_PROJECT_DIR
+    - cd ci_scripts
+    - ./sync_hardware_lib.sh
+    - cd $kuavo_hardware_lib_repo_path
+    - |
+      if [[ -n "$(git status --porcelain)" ]]; then
+        echo "Changes detected, committing and pushing..."
+        git add . && git add -u
+        git commit -am "sync $CI_PROJECT_URL/commit/$CI_COMMIT_SHA"
+        git push -f origin $CI_COMMIT_BRANCH
+      else
+        echo "No changes detected, skipping commit and push"
+      fi
+  dependencies:
+    - compile
+  only:
+    - dev
+    - beta
+    - master
+    - /^sync_hardware_lib.*/
+
+sync_kuavo_msgs_to_ros2:
+  stage: sync_kuavo_msgs_to_ros2
+  extends: .ros_before_script
+  tags:
+    - ocs2
+  script:
+    - echo "Sync kuavo_msgs to ros2..."
+    - mkdir -p $kuavo_ros2_bridge_repo_path
+    - cd $kuavo_ros2_bridge_repo_path
+    - git clone $kuavo_ros2_bridge_repo_url . || echo "After clone"
+    - git fetch origin
+    - if git show-ref --verify --quiet refs/remotes/origin/$CI_COMMIT_BRANCH; then
+        echo "Branch $CI_COMMIT_BRANCH exists. Checking out.";
+        git checkout -B $CI_COMMIT_BRANCH origin/$CI_COMMIT_BRANCH;
+      else
+        echo "Branch $CI_COMMIT_BRANCH does not exist. Creating and pushing the branch.";
+        git checkout -b $CI_COMMIT_BRANCH;
+        git push origin $CI_COMMIT_BRANCH;
+      fi
+    - git reset --hard origin/$CI_COMMIT_BRANCH
+    - git clean -df
+    - cd $CI_PROJECT_DIR
+    - cd ci_scripts
+    - ./sync_kuavo_msg_to_ros2.sh $kuavo_ros2_bridge_repo_path
+    - cd $kuavo_ros2_bridge_repo_path
+    - |
+      if [[ -n "$(git status --porcelain)" ]]; then
+        echo "Changes detected, committing and pushing..."
+        git add . && git add -u
+        git commit -am "sync $CI_PROJECT_URL/commit/$CI_COMMIT_SHA"
+        git push -f origin $CI_COMMIT_BRANCH
+      else
+        echo "No changes detected, skipping commit and push"
+      fi
+  dependencies:
+    - compile
+  rules:
+    - if: $CI_COMMIT_BRANCH =~ /^(dev|beta|master|ros2.*)$/
+      changes:
+        - src/kuavo_msgs/**/*
+    - if: $CI_COMMIT_BRANCH =~ /^(dev|beta|master|ros2.*)$/
+      when: manual
+      allow_failure: true
+
+sync_kuavo_msgs_to_split_repo:
+  stage: sync_kuavo_msgs_to_split_repo
+  extends: .ros_before_script
+  tags:
+    - ocs2
+  script:
+    - echo "Sync kuavo_msgs to split ros1 message repo..."
+    - mkdir -p $temp_target_kuavo_ros_control_split_ros1_mesage_src_path
+    - cd $temp_target_kuavo_ros_control_split_ros1_mesage_src_path
+    - git clone $remote_kuavo_ros_control_split_ros1_message_srv . || echo "Already cloned"
+    - git fetch origin
+    - if git show-ref --verify --quiet refs/remotes/origin/$CI_COMMIT_BRANCH; then
+        echo "Branch $CI_COMMIT_BRANCH exists. Checking out.";
+        git checkout -B $CI_COMMIT_BRANCH origin/$CI_COMMIT_BRANCH;
+      else
+        echo "Branch $CI_COMMIT_BRANCH does not exist. Creating and pushing.";
+        git checkout -b $CI_COMMIT_BRANCH;
+        git push origin $CI_COMMIT_BRANCH;
+      fi
+    - git reset --hard origin/$CI_COMMIT_BRANCH || true
+    - git clean -df
+    - >-
+      rsync -av --delete
+      --exclude='.git'
+      $CI_PROJECT_DIR/src/kuavo_msgs/
+      $temp_target_kuavo_ros_control_split_ros1_mesage_src_path/
+    - |
+      if [[ -n "$(git status --porcelain)" ]]; then
+        echo "Changes detected, committing and pushing..."
+        git add . && git add -u
+        git commit -m "sync from kuavo-ros-control commit $CI_COMMIT_SHORT_SHA
+
+      source commit: $CI_PROJECT_URL/-/commit/$CI_COMMIT_SHA
+      source branch: $CI_COMMIT_BRANCH
+      pipeline: $CI_PIPELINE_URL"
+        git push origin $CI_COMMIT_BRANCH
+        TARGET_COMMIT_SHA=$(git rev-parse --short HEAD)
+        TARGET_REPO_URL=$(git remote get-url origin | sed -e 's|ssh://git@|https://|' -e 's|:[0-9][0-9]*/|/|' -e 's|\.git$||')
+        curl -s -X POST "$kuavo_ros_control_sync_kuavo_msg_feishu_webhook" \
+          -H 'Content-Type: application/json' \
+          -d "{
+            \"msg_type\": \"text\",
+            \"content\": {
+              \"text\": \"【通知】kuavo_msgs 同步成功\n分支: $CI_COMMIT_BRANCH\n源仓库 kuavo-ros-control commit: $CI_COMMIT_SHORT_SHA ($CI_PROJECT_URL/-/commit/$CI_COMMIT_SHA)\n目标仓库 commit: $TARGET_COMMIT_SHA ($TARGET_REPO_URL/-/commit/$(git rev-parse HEAD))\npipeline: $CI_PIPELINE_URL\"
+            }
+          }"
+      else
+        echo "No changes detected, skipping commit and push"
+      fi
+  rules:
+    - if: $CI_COMMIT_BRANCH =~ /^(dev|beta|master|opensource\/.*)$/
+      changes:
+        - src/kuavo_msgs/**/*
+    - if: $CI_COMMIT_BRANCH =~ /^(dev|beta|master|opensource\/.*)$/
+      when: manual
+      allow_failure: true
+
+sync_to_kuavo_rl:
+  stage: sync_to_kuavo_rl
+  extends: .ros_before_script
+  tags:
+    - ocs2
+  script:
+    - echo "Sync to kuavo_rl..."
+    - rm -rf docs_internal
+    - cd $CI_PROJECT_DIR
+    - chmod +x ./ci_scripts/sync_to_kuavo_rl.sh && ./ci_scripts/sync_to_kuavo_rl.sh
+  only:
+      - dev
+      - /^kuavo_rl.*/
+
+
+compile_docs_build:
+  stage: compile_docs
+  extends: .nodejs_before_script
+  retry:
+    max: 2
+    when:
+      - script_failure
+      - unknown_failure
+  script:
+    - rm -rf docs_internal
+    - bash ci_scripts/complie_docs.sh
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master"
+      when: never
+    - if: $CI_COMMIT_BRANCH == "beta"
+      when: never
+    - when: on_success
+  tags:
+    - macmini1
+
+sync_beta_docs:
+  stage: sync_docs
+  script:
+    - rm -rf docs_internal
+    - export TARGET_BRANCH=dev
+    - bash ci_scripts/sync_docs.sh
+
+  only:
+    - beta
+  tags:
+    - macmini1
+
+sync_master_docs:
+  stage: sync_docs
+  script:
+    - rm -rf docs_internal
+    - export TARGET_BRANCH=master
+    - bash ci_scripts/sync_docs.sh
+
+  only:
+    - master
+  tags:
+    - macmini1
+
+notify:
+  stage: notify
+  script:
+    - echo "Notify..."
+    - sudo chown -R $USER:$USER .
+    - cd ci_scripts
+    - sudo chmod +x wechat_bot_notify.sh
+    - ./wechat_bot_notify.sh "OCS2 开源仓库分支 $CI_COMMIT_BRANCH 同步成功， 请访问 https//www.lejuhub.com/highlydynamic/craic_code_repo/-/tree/$CI_COMMIT_BRANCH 查看详情" "$WECHAT_BOT_TOKEN"
+    - rm -rf "$CI_BUILDS_DIR/${CI_JOB_ID}/tmp"
+
+  dependencies:
+    - sync_to_gitee
+  only:
+    - dev
+    - /^opensource.*/
+    - master
+    - beta
+
+sync_tools:
+  stage: sync_tools
+  script:
+    - VERSION=$(git describe)
+    - echo "正在将版本 ${VERSION} 的 'tools/setup-kuavo-ros-control.sh' 上传到七牛云服务"
+    - qshell rput --overwrite kuavo statics/setup-kuavo-ros-control.sh ./tools/setup-kuavo-ros-control.sh
+    - qshell rput --overwrite kuavo statics/setup-kuavo-ros-control-${VERSION}.sh ./tools/setup-kuavo-ros-control.sh
+    - qshell rput --overwrite kuavo statics/install_log_uploader-${VERSION}.sh ./tools/upload_log/install_log_uploader.sh
+    - qshell rput --overwrite kuavo statics/install_log_uploader-latest.sh ./tools/upload_log/install_log_uploader.sh
+    - if [ $? -ne 0 ]; then echo "Upload of version ${VERSION} failed in sync_tools stage"; exit 1; fi
+    - cd ci_scripts
+    - sudo chmod +x wechat_bot_notify.sh
+    - ./wechat_bot_notify.sh "[Dev Branch] 安装脚本 ${VERSION} 已更新, 一键安装命令" "$WECHAT_BOT_TOKEN"
+    - ./wechat_bot_notify.sh "wget -qO /tmp/setup-kuavo-ros-control.sh https://kuavo.lejurobot.com/statics/setup-kuavo-ros-control-${VERSION}.sh; sudo chmod +x /tmp/setup-kuavo-ros-control.sh; /tmp/setup-kuavo-ros-control.sh" "$WECHAT_BOT_TOKEN"
+
+  only:
+    - dev
+
+sync_tags_to_opensource:
+  stage: sync_tags
+  script:
+    - chmod u+x ./ci_scripts/sync_opensource_tag.sh
+    - ./ci_scripts/sync_opensource_tag.sh
+  only:
+    - tags
+
+publish_beta_sdk_to_pypi:
+  stage: publish_sdk
+  tags:
+    - ocs2 # Or a specific runner tag if needed
+  script:
+    - pip install --upgrade twine urllib3
+    - git clean -xdf
+    - export ROBOT_VERSION=34
+    - export LD_LIBRARY_PATH="/opt/drake/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    - export PATH="/opt/drake/bin${PATH:+:${PATH}}"
+    - source /opt/ros/noetic/setup.bash
+    - export CC="ccache gcc"
+    - export CXX="ccache g++"
+    - ccache --max-size=10G
+    - export ROBOT_VERSION=40
+    - export PROJECT_VERSION_VAR=$(git describe)
+    - echo "Compiling..."
+    - cd $CI_PROJECT_DIR
+    - git submodule update --init --recursive --force
+    - cd $CI_PROJECT_DIR
+    - catkin config --no-install -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_ASM_COMPILER=/usr/bin/as
+    - catkin build -j6 -l6 humanoid_controllers
+    - catkin build -j6 -l6 motion_capture_ik
+    # Fetch the target branches
+    - git fetch origin dev master
+    - |
+      # Unset proxy environment variables before publishing to PyPI
+      unset https_proxy
+      unset http_proxy
+      unset all_proxy
+
+      echo "Checking for modified .msg or .srv files in this push..."
+      # Calculate diff against dev and master
+      diff_dev=$(git diff --name-only origin/dev...HEAD)
+      diff_master=$(git diff --name-only origin/master...HEAD)
+      count_dev=$(echo "$diff_dev" | wc -l)
+      count_master=$(echo "$diff_master" | wc -l)
+      if [ "$count_dev" -lt "$count_master" ]; then changed_files="$diff_dev"; else changed_files="$diff_master"; fi
+      echo "Changed files in this push:"
+      echo "$changed_files"
+      
+      if echo "$changed_files" | grep -qE '\.(msg|srv)$' || echo "$changed_files" | grep -qE '^src/kuavo_humanoid_sdk/'  || echo "$changed_files" | grep -qE '^src/kuavo_humanoid_websocket_sdk/'; then
+        echo "Found modified .msg, .srv files or changes within src/kuavo_humanoid_sdk/. Proceeding with SDK publish to TestPyPI."
+        cd ci_scripts
+        bash ./publish_kuavo_humanoid_sdk.sh --branch "${CI_COMMIT_BRANCH}"
+        bash ./publish_kuavo_humanoid_sdk_ws.sh --branch "${CI_COMMIT_BRANCH}"
+        cd ..
+        echo "Publishing Beta Kuavo SDK to TestPyPI..."
+      else
+        echo "No modified .msg, .srv files or changes within src/kuavo_humanoid_sdk/ found in this push. Skipping SDK publish to TestPyPI."
+      fi
+  only:
+    - beta # Only run this job on the beta branch
+    - /^testpipy\/chenmingfu\/.*/ # Also run for specific opensource branches
+
+
+publish_sdk_to_pypi:
+  stage: publish_sdk
+  tags:
+    - ocs2 # Or a specific runner tag if needed
+  script:
+    - echo "Publishing Kuavo SDK to PyPI for tag $CI_COMMIT_TAG..."
+    - pip install --upgrade twine urllib3
+    - git clean -xdf
+    - export ROBOT_VERSION=34
+    - export LD_LIBRARY_PATH="/opt/drake/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    - export PATH="/opt/drake/bin${PATH:+:${PATH}}"
+    - source /opt/ros/noetic/setup.bash
+    - export CC="ccache gcc"
+    - export CXX="ccache g++"
+    - ccache --max-size=10G
+    - export ROBOT_VERSION=40
+    - export PROJECT_VERSION_VAR=$(git describe)
+    - echo "Compiling..."
+    - cd $CI_PROJECT_DIR
+    - git submodule update --init --recursive --force
+    - cd $CI_PROJECT_DIR
+    - catkin config --no-install -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_ASM_COMPILER=/usr/bin/as
+    - catkin build -j6 -l6 humanoid_controllers
+    - catkin build -j6 -l6 motion_capture_ik
+    - cd $CI_PROJECT_DIR/ci_scripts
+    - unset https_proxy
+    - unset http_proxy
+    - unset all_proxy
+    - bash ./publish_kuavo_humanoid_sdk.sh --branch "master"
+    - bash ./publish_kuavo_humanoid_sdk_ws.sh --branch "master"
+    - cd ..
+    - echo "Kuavo SDK published to PyPI."
+  only:
+    - tags # Only run this job when a git tag is pushed
+
+notify_on_failure:
+  stage: notify_failure
+  script:
+    - echo "Notifying failure..."
+    - sudo chown -R $USER:$USER .
+    - cd ci_scripts
+    - sudo chmod +x wechat_bot_notify.sh
+    - ./wechat_bot_notify.sh "CI 编译失败，具体地址 $CI_PROJECT_URL/-/pipelines/$CI_PIPELINE_ID " "$WECHAT_ERR_BOT_TOKEN"
+    - rm -rf "$CI_BUILDS_DIR/${CI_JOB_ID}/tmp"
+
+  when: on_failure
+  tags:
+    - ocs2
+
+
+package_ws_deb:
+  stage: sync_to_opensource
+  extends: .build_before_other_jobs
+  tags:
+    - ocs2
+  script:
+    - echo "Creating Debian package..."
+    - cd $CI_PROJECT_DIR
+    # 检查 opensource 仓库是否存在，如果不存在（可能在不同的 runner 上运行）则自己克隆
+    - |
+      if [ ! -d "$temp_target_repo_path/git_repo/.git" ]; then
+        echo "Opensource repo not found at $temp_target_repo_path/git_repo, cloning it..."
+        mkdir -p $temp_target_repo_path
+        cd $temp_target_repo_path
+        rm -rf git_repo
+        git clone $opensource_project_origin git_repo
+        cd $CI_PROJECT_DIR
+      fi
+    - cd $temp_target_repo_path/git_repo/
+    - git restore --staged .
+    - git clean -dfx && git checkout .
+    - |
+      # Retry function with exponential backoff
+      retry_git_command() {
+        local cmd="$1"
+        local max_attempts=6
+        local attempt=1
+        while [ $attempt -le $max_attempts ]; do
+          echo "Attempt $attempt/$max_attempts: $cmd"
+          if eval "$cmd"; then
+            return 0
+          else
+            if [ $attempt -eq $max_attempts ]; then
+              echo "Command failed after $max_attempts attempts"
+              return 1
+            fi
+            local delay=$((2**attempt))
+            echo "Command failed, retrying in $delay seconds..."
+            sleep $delay
+            attempt=$((attempt + 1))
+          fi
+        done
+      }
+    - retry_git_command "git fetch origin --prune"
+    - if git show-ref --verify --quiet refs/remotes/origin/$CI_COMMIT_BRANCH; then
+        echo "Remote branch $CI_COMMIT_BRANCH exists. Checking out.";
+        git checkout -B $CI_COMMIT_BRANCH origin/$CI_COMMIT_BRANCH;
+      else
+        echo "Remote branch $CI_COMMIT_BRANCH does not exist. Creating and pushing the branch.";
+        if git show-ref --verify --quiet refs/remotes/origin/main; then
+          git checkout -B $CI_COMMIT_BRANCH origin/main;
+        elif git show-ref --verify --quiet refs/remotes/origin/master; then
+          git checkout -B $CI_COMMIT_BRANCH origin/master;
+        elif git show-ref --verify --quiet refs/remotes/origin/dev; then
+          git checkout -B $CI_COMMIT_BRANCH origin/dev;
+        else
+          git checkout -b $CI_COMMIT_BRANCH;
+        fi;
+        git push -u origin $CI_COMMIT_BRANCH;
+      fi
+    - git reset --hard origin/$CI_COMMIT_BRANCH 2>/dev/null || echo "Branch doesn't exist on remote yet"
+    - git restore --staged .
+    - git clean -df
+    - cd $CI_PROJECT_DIR
+    - git checkout src/manipulation_nodes/motion_capture_ik
+    - rm -rf docs_internal
+    - cd ci_scripts
+    - sudo chmod +x build.sh
+    - sudo chmod +x del_close_source_packs.sh
+    - ./del_close_source_packs.sh close_source_packs.txt
+    - cd ..
+    - VERSION=$(git describe --tags)
+    - mkdir -p ./.version
+    - git rev-parse HEAD > "./.version/GIT_COMMIT"
+    - git rev-parse --abbrev-ref HEAD > "./.version/GIT_BRANCH"
+    - git config --get remote.origin.url > "./.version/GIT_REMOTE"
+    - git describe --tags > "./.version/GIT_TAG"
+    - sudo rm -rf /opt/ros/leju
+    - sudo mkdir -p /opt/ros/leju
+    - sudo rsync -a --exclude=".git" . /opt/ros/leju
+    - cd /opt/ros/leju
+    - sudo rm -rf installed
+    - mv readme_opensource.md readme.md
+    # 使用 before_script 中准备好的 installed 目录（来自缓存或重新编译）
+    - cp -r $CI_PROJECT_DIR/installed installed
+    - cd ci_scripts
+    - ./del_close_source_packs.sh close_source_packs.txt
+    - cd /opt/ros/leju
+    - sudo catkin clean -d -b -L -y
+    - source installed/setup.bash
+    - catkin build -j6 -l6 humanoid_controllers humanoid_plan_arm_trajectory planarmwebsocketservice gazebo_sim
+    - cd /opt/ros/leju
+    - sudo rm .gitlab-ci.yml
+    - sudo rm -rf ci_scripts
+    - sudo rm ./src/manipulation_nodes/motion_capture_ik/src/plantIK.cc
+    - echo "📦 Start packaging..."
+    - PKG_NAME=ros-leju-workspace
+    - BUILD_DIR=$CI_PROJECT_DIR/deb_build/$PKG_NAME
+    - PKG_DIR=$BUILD_DIR/opt/ros/leju
+    - mkdir -p $PKG_DIR
+    - rsync -a --exclude=".git" --exclude="build" /opt/ros/leju/ $PKG_DIR/
+    - mkdir -p $BUILD_DIR/DEBIAN
+    - mkdir -p $BUILD_DIR/usr/bin
+    - cp ./scripts/leju_start.sh $BUILD_DIR/usr/bin/leju
+    - sudo chmod 755 $BUILD_DIR/usr/bin/leju
+    - |
+      cat > $BUILD_DIR/DEBIAN/control <<EOF
+      Package: $PKG_NAME
+      Version: $VERSION
+      Section: misc
+      Priority: optional
+      Architecture: amd64
+      Maintainer: LejuRobot <LejuRobot@lejurobot.com>
+      Description: Leju kuavo robot  Workspace under /opt/ros/leju
+      EOF
+    - dpkg-deb --build $BUILD_DIR $CI_PROJECT_DIR/deb_build/${PKG_NAME}_${VERSION}.deb
+    - cd $CI_PROJECT_DIR/deb_build
+    - echo "📤 Uploading to QiNiu Cloud..."
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "master" ]; then
+        DEB_FILENAME="${PKG_NAME}_${VERSION}.deb"
+      else
+        DEB_FILENAME="${PKG_NAME}_${VERSION}-${CI_COMMIT_BRANCH}.deb"
+      fi
+    - echo "Uploading versioned package ${DEB_FILENAME}"
+    - qshell rput --overwrite kuavo packages/${DEB_FILENAME} ./${PKG_NAME}_${VERSION}.deb
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "master" ]; then
+        echo "Updating latest version for master branch..."
+        qshell rput --overwrite kuavo packages/${PKG_NAME}_latest.deb ./${PKG_NAME}_${VERSION}.deb
+      fi
+    - if [ $? -ne 0 ]; then echo "Upload of version ${VERSION} failed in package_ws_deb stage"; exit 1; fi
+    - echo "✅ Package uploaded successfully"
+    - cd $CI_PROJECT_DIR/ci_scripts
+    - sudo chmod +x wechat_bot_notify.sh
+    - |
+      # 根据分支发送不同的通知消息
+      if [ "$CI_COMMIT_BRANCH" = "master" ]; then
+        ./wechat_bot_notify.sh "🎉 [正式版] Kuavo ROS 工作空间 Debian 包 ${VERSION} 已发布到七牛云" "$WECHAT_BOT_TOKEN"
+        ./wechat_bot_notify.sh "📦 下载地址 https://kuavo.lejurobot.com/packages/${DEB_FILENAME}" "$WECHAT_BOT_TOKEN"
+        ./wechat_bot_notify.sh "🔧 一键安装最新正式版 wget -O ${PKG_NAME}_latest.deb https://kuavo.lejurobot.com/packages/${PKG_NAME}_latest.deb && sudo dpkg -i ${PKG_NAME}_latest.deb" "$WECHAT_BOT_TOKEN"
+        ./wechat_bot_notify.sh "📌 此版本已更新为最新正式版 (latest)" "$WECHAT_BOT_TOKEN"
+      else
+        ./wechat_bot_notify.sh "🚧 [${CI_COMMIT_BRANCH}分支] Kuavo ROS 工作空间 Debian 包 ${VERSION} 已发布到七牛云" "$WECHAT_BOT_TOKEN"
+        ./wechat_bot_notify.sh "📦 下载地址 https://kuavo.lejurobot.com/packages/${DEB_FILENAME}" "$WECHAT_BOT_TOKEN"
+        ./wechat_bot_notify.sh "🔧 安装命令 wget -O ${DEB_FILENAME} https://kuavo.lejurobot.com/packages/${DEB_FILENAME} && sudo dpkg -i ${DEB_FILENAME}" "$WECHAT_BOT_TOKEN"
+        ./wechat_bot_notify.sh "⚠️ 注意 这是开发版本，非正式发布" "$WECHAT_BOT_TOKEN"
+      fi
+  only:
+    - /^opensource.*/
+    - master
+    - beta
+    - dev

@@ -1,0 +1,22 @@
+<?xml version="1.0" ?>
+<launch>
+    <!--
+    Ruiwo Motor Controller Test Launch File
+
+    Parameters:
+    - cali_arm: Enable arm calibration (default: false)
+    - robot_type: Robot type (default: kuavo, options: roban, kuavo)
+    - use_old_version: Use old version actuator (default: true)
+    -->
+
+    <arg name="cali_arm"  default="false" doc="Enable arm calibration" />
+    <arg name="robot_type" default="kuavo" doc="Robot type: roban or kuavo" />
+    <arg name="can_protocol" default="true" />
+
+    <param name="cali_arm"  value="$(arg cali_arm)"/>
+    <param name="use_old_version" value="$(eval not arg('can_protocol'))"/>
+    <param name="robot_type" value="$(arg robot_type)" />
+
+    <node pkg="hardware_node" type="ruiwo_motor_ros_cxx_test" name="ruiwo_motor_ros_cxx_test" output="screen"  required="true">
+    </node>
+</launch>

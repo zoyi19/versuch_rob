@@ -1,0 +1,26 @@
+cmake_minimum_required(VERSION 3.0.2)
+project(hardware_lib)
+
+set(CMAKE_INSTALL_PREFIX ${CMAKE_SOURCE_DIR}/install)
+add_compile_definitions(KUAVO_ASSETS_PATH="${CMAKE_INSTALL_PREFIX}/share/${PROJECT_NAME}")
+add_subdirectory(kuavo_common)
+add_subdirectory(kuavo_solver)
+add_subdirectory(hardware_plant)
+
+install(DIRECTORY kuavo_assets/config kuavo_assets/scripts
+    DESTINATION share/kuavo_assets
+)
+install(FILES hardware_plant/.gitignore
+    DESTINATION .
+    RENAME .gitignore
+)
+install(FILES hardware_plant/kuavo_hardware_lib_README.md
+    DESTINATION .
+    RENAME README.md
+)
+install(FILES hardware_plant/HARDWARE_PLANT_INTERFACES.md
+    DESTINATION docs
+)
+install(DIRECTORY hardware_plant/examples
+    DESTINATION .
+)

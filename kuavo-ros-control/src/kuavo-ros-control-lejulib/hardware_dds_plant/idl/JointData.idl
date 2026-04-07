@@ -1,0 +1,11 @@
+module leju {
+  module msgs {
+    @final
+    struct JointData {
+      sequence<double> joint_q;
+      sequence<double> joint_v;
+      sequence<double> joint_vd;
+      sequence<double> joint_torque;
+    };
+  };
+};

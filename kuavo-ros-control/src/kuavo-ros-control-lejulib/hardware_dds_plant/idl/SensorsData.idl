@@ -1,0 +1,17 @@
+#include "EndEffectorData.idl"
+#include "ImuData.idl"
+#include "JointData.idl"
+
+module leju {
+  module msgs {
+    @final
+    struct SensorsData {
+      int32 header_sec;
+      uint32 header_nanosec;
+      int64 sensor_time;
+      JointData joint_data;
+      ImuData imu_data;
+      EndEffectorData end_effector_data;
+    };
+  };
+};

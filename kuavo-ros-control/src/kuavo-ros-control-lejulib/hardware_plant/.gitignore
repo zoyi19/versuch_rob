@@ -1,0 +1,17 @@
+# Build directories
+tests/build/
+build/
+
+# IDE
+.vscode/
+.idea/
+.claue/
+CLAUDE.md
+*.swp
+*.swo
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile

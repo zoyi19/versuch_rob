@@ -1,0 +1,13 @@
+# 用 # 注释可以不被检测
+# 无需担心有空行 和 最后一行是否有换行符
+
+# 功能：用于指定某些文件参与检测
+# 使用方法举例，前面为功能包名字，后面为相对于功能包的路径
+# 指定文件，全部，路径
+
+# mujoco_cpp src/main.cc
+# humanoid_interface_ros .
+# humanoid_plan_arm_trajectory src
+# humanoid_interface_drake src/
+
+mujoco_cpp src/main.cc

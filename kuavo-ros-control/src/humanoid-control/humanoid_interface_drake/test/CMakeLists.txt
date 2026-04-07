@@ -1,0 +1,2 @@
+add_executable(test_humanoid_interface_drake test_humanoid_interface_drake.cpp)
+target_link_libraries(test_humanoid_interface_drake ${PROJECT_NAME})

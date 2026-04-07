@@ -1,0 +1,15 @@
+# 用 # 注释可以不被检测
+# 无需担心有空行 和 最后一行是否有换行符
+
+# 功能： 屏蔽检测指定内容
+# 检测器，检测器+某个文件的绝对路径，检测器+某个文件的某行
+# 检测器:绝对路径(必须如此):行号(可选)
+
+# noExplicitConstructor
+# shadowVariable
+# zerodiv
+# unreadVariable:/root/kuavo_ws/src/mujoco/src/main.cc
+# unreadVariable:/root/kuavo_ws/src/mujoco/src/main.cc:40
+
+constParameter
+constStatement
