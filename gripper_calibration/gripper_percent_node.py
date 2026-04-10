@@ -79,7 +79,7 @@ class GripperPercentNode:
         self.D = np.zeros((1, 5), dtype=np.float64)
 
         self.aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT_ID)
-        self.aruco_param = cv2.aruco.DetectorParameters_create()
+        self.aruco_param = cv2.aruco.DetectorParameters()
         self.aruco_param.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
 
         self.pub = rospy.Publisher('/gripper_percent', Float32, queue_size=1)

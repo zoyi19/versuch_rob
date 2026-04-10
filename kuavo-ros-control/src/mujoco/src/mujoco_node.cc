@@ -2033,6 +2033,103 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
 
 //------------------------------------------ main --------------------------------------------------
 
+void HeadlessLoadModel(mj::Simulate& sim) {
+    sim.m_ = sim.mnew_;
+    sim.d_ = sim.dnew_;
+
+    sim.ncam_ = sim.m_->ncam;
+    sim.nkey_ = sim.m_->nkey;
+    sim.body_parentid_.resize(sim.m_->nbody);
+    std::memcpy(sim.body_parentid_.data(), sim.m_->body_parentid,
+                sizeof(sim.m_->body_parentid[0]) * sim.m_->nbody);
+
+    sim.jnt_type_.resize(sim.m_->njnt);
+    std::memcpy(sim.jnt_type_.data(), sim.m_->jnt_type,
+                sizeof(sim.m_->jnt_type[0]) * sim.m_->njnt);
+    sim.jnt_group_.resize(sim.m_->njnt);
+    std::memcpy(sim.jnt_group_.data(), sim.m_->jnt_group,
+                sizeof(sim.m_->jnt_group[0]) * sim.m_->njnt);
+    sim.jnt_qposadr_.resize(sim.m_->njnt);
+    std::memcpy(sim.jnt_qposadr_.data(), sim.m_->jnt_qposadr,
+                sizeof(sim.m_->jnt_qposadr[0]) * sim.m_->njnt);
+
+    sim.jnt_range_.clear();
+    sim.jnt_range_.reserve(sim.m_->njnt);
+    for (int i = 0; i < sim.m_->njnt; ++i) {
+        if (sim.m_->jnt_limited[i]) {
+            sim.jnt_range_.push_back(
+                std::make_pair(sim.m_->jnt_range[2*i], sim.m_->jnt_range[2*i+1]));
+        } else {
+            sim.jnt_range_.push_back(std::nullopt);
+        }
+    }
+    sim.jnt_names_.clear();
+    sim.jnt_names_.reserve(sim.m_->njnt);
+    for (int i = 0; i < sim.m_->njnt; ++i) {
+        sim.jnt_names_.emplace_back(sim.m_->names + sim.m_->name_jntadr[i]);
+    }
+
+    sim.actuator_group_.resize(sim.m_->nu);
+    std::memcpy(sim.actuator_group_.data(), sim.m_->actuator_group,
+                sizeof(sim.m_->actuator_group[0]) * sim.m_->nu);
+    sim.actuator_ctrlrange_.clear();
+    sim.actuator_ctrlrange_.reserve(sim.m_->nu);
+    for (int i = 0; i < sim.m_->nu; ++i) {
+        if (sim.m_->actuator_ctrllimited[i]) {
+            sim.actuator_ctrlrange_.push_back(std::make_pair(
+                sim.m_->actuator_ctrlrange[2*i], sim.m_->actuator_ctrlrange[2*i+1]));
+        } else {
+            sim.actuator_ctrlrange_.push_back(std::nullopt);
+        }
+    }
+    sim.actuator_names_.clear();
+    sim.actuator_names_.reserve(sim.m_->nu);
+    for (int i = 0; i < sim.m_->nu; ++i) {
+        sim.actuator_names_.emplace_back(sim.m_->names + sim.m_->name_actuatoradr[i]);
+    }
+
+    sim.qpos_.resize(sim.m_->nq);
+    std::memcpy(sim.qpos_.data(), sim.d_->qpos, sizeof(sim.d_->qpos[0]) * sim.m_->nq);
+    sim.qpos_prev_ = sim.qpos_;
+    sim.ctrl_.resize(sim.m_->nu);
+    std::memcpy(sim.ctrl_.data(), sim.d_->ctrl, sizeof(sim.d_->ctrl[0]) * sim.m_->nu);
+    sim.ctrl_prev_ = sim.ctrl_;
+
+    if (!sim.is_passive_) {
+        constexpr int kHistoryLength = 2000;
+        constexpr int kMaxHistoryBytes = 1e8;
+        sim.state_size_ = mj_stateSize(sim.m_, mjSTATE_INTEGRATION);
+        int state_bytes = sim.state_size_ * sizeof(mjtNum);
+        int history_bytes = mjMIN(state_bytes * kHistoryLength, kMaxHistoryBytes);
+        sim.nhistory_ = history_bytes / state_bytes;
+        sim.history_.clear();
+        sim.history_.resize(sim.nhistory_ * sim.state_size_);
+        sim.history_cursor_ = 0;
+        mj_getState(sim.m_, sim.d_, sim.history_.data(), mjSTATE_INTEGRATION);
+        for (int i = 1; i < sim.nhistory_; ++i) {
+            mju_copy(&sim.history_[i * sim.state_size_], sim.history_.data(), sim.state_size_);
+        }
+    }
+
+    sim.loadrequest = 0;
+    sim.cond_loadrequest.notify_all();
+}
+
+void HeadlessLoop(mj::Simulate& sim) {
+    while (!sim.exitrequest.load()) {
+        {
+            const std::unique_lock<std::recursive_mutex> lock(sim.mtx);
+            if (sim.loadrequest == 1) {
+                HeadlessLoadModel(sim);
+            } else if (sim.loadrequest == 2) {
+                sim.loadrequest = 1;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    sim.exitrequest.store(2);
+}
+
 //**************************
 // run event loop
 int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
@@ -2072,7 +2169,11 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
     nh.getParam("/run_mujoco_camera", isRunCamera_);
   }
   ROS_INFO("run_mujoco_camera: %d", isRunCamera_);
-  
+
+  bool mujoco_headless = false;
+  nh.param("/mujoco_headless", mujoco_headless, false);
+  ROS_INFO("MuJoCo headless mode: %s", mujoco_headless ? "ON" : "OFF");
+
   // 获取only_half_up_body参数
   bool only_half_up_body = false;
   if (nh.hasParam("/only_half_up_body"))
@@ -2186,8 +2287,12 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
   // start physics thread
   std::thread physicsthreadhandle(&PhysicsThread, sim.get(), filename, only_half_up_body);
 
-  // start simulation UI loop (blocking call)
-  sim->RenderLoop();
+  if (mujoco_headless) {
+    ROS_INFO("Running MuJoCo in headless mode (no viewer, physics only)");
+    HeadlessLoop(*sim);
+  } else {
+    sim->RenderLoop();
+  }
   physicsthreadhandle.join();
 
   return 0;

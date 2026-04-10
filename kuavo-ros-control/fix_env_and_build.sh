@@ -87,6 +87,10 @@ echo "========================================="
 #   ocs2_raisim_core            - 需要 raisim 物理引擎 (Dockerfile中也未安装)
 #   ocs2_anymal_commands        - 需要 grid_map_filters_rsl (Dockerfile中也未安装)
 #   segmented_planes_terrain_model - 需要 convex_plane_decomposition (Dockerfile中也未安装)
+#   ocs2_raisim_ros             - 依赖 ocs2_raisim_core (已跳过)
+#   ocs2_quadruped_interface    - 依赖 ocs2_anymal_commands (已跳过)
+#   ocs2_mpcnet_core            - 需要 onnxruntime (未安装)
+#   hardware_node               - 需要 Xsens SDK xspublic (仓库未包含 Makefile, 硬件节点仿真不需要)
 
 catkin config --skiplist \
     xsens_mti_driver \
@@ -94,7 +98,11 @@ catkin config --skiplist \
     kuavo_arm_collision_check \
     ocs2_raisim_core \
     ocs2_anymal_commands \
-    segmented_planes_terrain_model
+    segmented_planes_terrain_model \
+    ocs2_raisim_ros \
+    ocs2_quadruped_interface \
+    ocs2_mpcnet_core \
+    hardware_node
 
 catkin build \
     -j$(nproc) \

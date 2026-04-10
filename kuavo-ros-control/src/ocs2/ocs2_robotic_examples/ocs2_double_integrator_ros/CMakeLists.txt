@@ -72,6 +72,7 @@ add_dependencies(double_integrator_mpc
 )
 target_link_libraries(double_integrator_mpc
   ${catkin_LIBRARIES}
+  ${pinocchio_LIBRARIES}
 )
 
 # Dummy node
@@ -84,6 +85,7 @@ add_dependencies(double_integrator_dummy_test
 )
 target_link_libraries(double_integrator_dummy_test
   ${catkin_LIBRARIES}
+  ${pinocchio_LIBRARIES}
 )
 
 # Target node
@@ -96,6 +98,7 @@ add_dependencies(double_integrator_target
 target_link_libraries(double_integrator_target
   ${catkin_LIBRARIES}
   ${Boost_LIBRARIES}
+  ${pinocchio_LIBRARIES}
 )
 target_compile_options(double_integrator_target PRIVATE ${OCS2_CXX_FLAGS})
 

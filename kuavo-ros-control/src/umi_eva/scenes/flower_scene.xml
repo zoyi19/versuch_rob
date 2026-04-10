@@ -1,0 +1,46 @@
+<?xml version="1.0" ?>
+<!--
+  flower_scene.xml — MJCF primitive 花瓶 + 刚体假花（方案 A）
+
+  使用方式：在主 scene XML（如 biped_s51_mujoco.xml）的 <worldbody> 里加：
+      <include file="../../../umi_eva/scenes/flower_scene.xml"/>
+  本片段假设主 scene 已经定义了一个名为 "table" 的 body 作为桌面，
+  花瓶通过 attach 到 table 的 child body 固定，假花是 freejoint 可被抓取。
+
+  几何参数（中度 DR 不随机这些）：
+    花瓶外径 ~8 cm，内半径 3 cm，壁厚 3 mm，高 12 cm
+    花茎 capsule 半径 4 mm，长 25 cm
+    花头 sphere 半径 2 cm
+
+  TODO：
+  - 等真实花瓶尺寸测量后再校准
+  - <material> 列表用于 domain_randomizer.py 切换纹理
+  - 8 个薄 box 围成圆筒的精确 pos/quat 用脚本生成更稳，先占位
+-->
+<mujoco model="flower_scene">
+  <asset>
+    <!-- TODO: 加 <material> 列表（vase_red / vase_blue / table_cloth_a / ...） -->
+  </asset>
+
+  <worldbody>
+    <!-- 花瓶：固定在桌面上，TODO 改成 attach 到现有 table body -->
+    <body name="vase" pos="0.4 0.0 0.75">
+      <!-- 底座 -->
+      <geom name="vase_base" type="cylinder" size="0.04 0.005" rgba="0.6 0.6 0.7 1"/>
+      <!-- 内壁：8 个薄 box 围成开口圆筒，TODO 用脚本算 pos/quat -->
+      <!-- <geom name="vase_wall_0" type="box" size="0.003 0.025 0.06" pos="..." quat="..."/> -->
+      <!-- ... 共 8 段 ... -->
+    </body>
+
+    <!-- 假花：方案 A 刚体，freejoint 可被抓取 -->
+    <body name="flower" pos="0.5 -0.1 0.78">
+      <freejoint name="flower_free"/>
+      <!-- 花茎 -->
+      <geom name="flower_stem" type="capsule" fromto="0 0 0  0 0 0.25"
+            size="0.004" rgba="0.2 0.6 0.2 1" mass="0.02"/>
+      <!-- 花头 -->
+      <geom name="flower_head" type="sphere" pos="0 0 0.27"
+            size="0.02" rgba="0.9 0.2 0.2 1" mass="0.005"/>
+    </body>
+  </worldbody>
+</mujoco>

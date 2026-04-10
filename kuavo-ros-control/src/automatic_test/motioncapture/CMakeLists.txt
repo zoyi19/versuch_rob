@@ -77,6 +77,7 @@ link_directories(
 add_executable(SampleClient
   src/SampleClient.cpp    # 源码放在 src/ 文件夹下
 )
+add_dependencies(SampleClient ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## 10. 链接库
 target_link_libraries(SampleClient

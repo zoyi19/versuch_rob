@@ -1,0 +1,24 @@
+<?xml version="1.0" ?>
+<!--
+  wrist_cam_snippet.xml — D405 腕部相机 XML 片段
+
+  使用方式：在主 scene XML 的末端 link（左手或右手 end_link）下手动加：
+      <include file="../../../umi_eva/scenes/wrist_cam_snippet.xml"/>
+  本片段不直接修改 biped_sXX_mujoco.xml。
+
+  D405 参数：
+    pinhole（无明显畸变，无需 undistort）
+    水平 FOV ≈ 87°，垂直 FOV ≈ 58°  → MuJoCo 用 fovy=58
+    渲染分辨率与训练一致（如 848×480）
+
+  TODO：
+  - pos/quat 必须等于真实标定的 T_endlink_cam，差几毫米会让闭环视觉失效
+  - 通过 mujoco ROS 插件发布到 /wrist_cam/color/image_raw（topic 与真实硬件一致）
+-->
+<mujocoinclude>
+  <camera name="wrist_cam"
+          fovy="58"
+          pos="0 0 0"
+          quat="1 0 0 0"/>
+  <!-- TODO: 替换 pos/quat 为标定结果 T_endlink_cam -->
+</mujocoinclude>

@@ -591,7 +591,7 @@ namespace ocs2
     ROS_INFO_STREAM("Start spinning now ...");
     // Equivalent to ros::spin() + check if master is alive
     ros::Rate loop_rate(mpc_.settings().mpcDesiredFrequency_);
-    while (::ros::ok() && ::ros::master::check())
+    while (::ros::ok())
     {
       // ::ros::getGlobalCallbackQueue()->callAvailable(ros::WallDuration(0.1));
       ros::spinOnce();
