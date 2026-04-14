@@ -21,7 +21,7 @@ source devel/setup.bash
 cd src/demo/umi_replay/scripts
 
 # 不使用夹爪：
-python3 umi_realtime_teleop.py --no-gripper
+python3 umi_realtime_teleop.py --no-gripper rate 50 fhan-r 1.0 fhan-h0-scale 5.0 delta-scale 0.5 max-delta 0.35
 
 # 使用夹爪：
 python3 umi_realtime_teleop.py \

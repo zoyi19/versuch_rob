@@ -81,6 +81,7 @@ class GripperPercentNode:
         self.aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICT_ID)
         self.aruco_param = cv2.aruco.DetectorParameters()
         self.aruco_param.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+        self._detector = cv2.aruco.ArucoDetector(self.aruco_dict, self.aruco_param)
 
         self.pub = rospy.Publisher('/gripper_percent', Float32, queue_size=1)
         self.sub = rospy.Subscriber(image_topic, Image, self._cb, queue_size=1,
@@ -110,9 +111,7 @@ class GripperPercentNode:
             self.pub.publish(Float32(data=-1.0))
             return
 
-        corners, ids, _ = cv2.aruco.detectMarkers(
-            image=img, dictionary=self.aruco_dict,
-            parameters=self.aruco_param)
+        corners, ids, _ = self._detector.detectMarkers(img)
 
         if ids is None or len(ids) == 0:
             self.pub.publish(Float32(data=-1.0))
@@ -120,13 +119,20 @@ class GripperPercentNode:
             return
 
         tag_dict = {}
+        half = self.marker_size / 2.0
+        obj_pts = np.array([[-half,  half, 0],
+                            [ half,  half, 0],
+                            [ half, -half, 0],
+                            [-half, -half, 0]], dtype=np.float64)
         for tag_id, tag_corners in zip(ids.flatten(), corners):
-            rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
-                tag_corners.reshape(1, 4, 2),
-                self.marker_size, self.K, self.D)
+            ok, rvec, tvec = cv2.solvePnP(
+                obj_pts, tag_corners.reshape(4, 2),
+                self.K, self.D, flags=cv2.SOLVEPNP_IPPE_SQUARE)
+            if not ok:
+                continue
             tag_dict[int(tag_id)] = {
-                'tvec': tvecs.squeeze(),
-                'rvec': rvecs.squeeze(),
+                'tvec': tvec.squeeze(),
+                'rvec': rvec.squeeze(),
             }
 
         width = get_gripper_width(
